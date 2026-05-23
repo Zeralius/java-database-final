@@ -1,6 +1,178 @@
 package com.project.code.Controller;
 
+
+import com.project.code.Model.CombinedRequest;
+import com.project.code.Model.Inventory;
+import com.project.code.Model.Product;
+import com.project.code.Repo.InventoryRepository;
+import com.project.code.Repo.ProductRepository;
+import com.project.code.Service.ServiceClass;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
+@RestController
+@RequestMapping("/inventory")
 public class InventoryController {
+
+    @Autowired
+    private ProductRepository productRepository;
+
+    @Autowired
+    private InventoryRepository inventoryRepository;
+
+    @Autowired
+    private ServiceClass serviceClass;
+
+
+    @PutMapping
+    public Map<String, String> updateInventory(@RequestBody CombinedRequest combinedRequest) {
+        Map<String, String> response = new HashMap<>();
+        try {
+            Product incomingProduct = combinedRequest.getProduct();
+            Inventory incomingInventory = combinedRequest.getInventory();
+
+
+            boolean productExists = serviceClass.validateProductId(incomingProduct.getId());
+            if (!productExists) {
+                response.put("message", "Product not found with ID: " + incomingProduct.getId());
+                return response;
+            }
+
+
+            Inventory existingInventory = inventoryRepository.findByProductIdAndStoreId(
+                    incomingProduct.getId(),
+                    incomingInventory.getStore().getId()
+            );
+
+            if (existingInventory != null) {
+
+                productRepository.save(incomingProduct);
+
+                existingInventory.setStockLevel(incomingInventory.getStockLevel());
+                inventoryRepository.save(existingInventory);
+
+                response.put("message", "Successfully updated product");
+            } else {
+                response.put("message", "No data available");
+            }
+        } catch (DataIntegrityViolationException e) {
+            response.put("message", "Data integrity violation: " + e.getMessage());
+        } catch (Exception e) {
+            response.put("message", "Error occurred: " + e.getMessage());
+        }
+        return response;
+    }
+
+
+    @PostMapping
+    public Map<String, String> saveInventory(@RequestBody Inventory inventory) {
+        Map<String, String> response = new HashMap<>();
+        try {
+
+            boolean isNewInventory = serviceClass.validateInventory(inventory);
+
+            if (!isNewInventory) {
+                response.put("message", "Data is already present");
+            } else {
+                inventoryRepository.save(inventory);
+                response.put("message", "Data saved successfully");
+            }
+        } catch (DataIntegrityViolationException e) {
+            response.put("message", "Database integrity error: Duplicate or invalid key reference.");
+        } catch (Exception e) {
+            response.put("message", "An error occurred: " + e.getMessage());
+        }
+        return response;
+    }
+
+
+    @GetMapping("/{storeid}")
+    public Map<String, Object> getAllProducts(@PathVariable("storeid") Long storeId) {
+        Map<String, Object> response = new HashMap<>();
+        List<Product> products = productRepository.findProductsByStoreId(storeId);
+        response.put("products", products);
+        return response;
+    }
+
+
+    @GetMapping("filter/{category}/{name}/{storeid}")
+    public Map<String, Object> getProductName(
+            @PathVariable("category") String category,
+            @PathVariable("name") String name,
+            @PathVariable("storeid") Long storeId) {
+
+        Map<String, Object> response = new HashMap<>();
+        List<Product> filteredProducts;
+
+        boolean isCategoryNull = "null".equalsIgnoreCase(category);
+        boolean isNameNull = "null".equalsIgnoreCase(name);
+
+        if (isCategoryNull && !isNameNull) {
+
+            filteredProducts = productRepository.findByNameLike(storeId, name);
+        } else if (!isCategoryNull && isNameNull) {
+
+            filteredProducts = productRepository.findByCategoryAndStoreId(storeId, category);
+        } else if (!isCategoryNull && !isNameNull) {
+
+            filteredProducts = productRepository.findByNameAndCategory(storeId, name, category);
+        } else {
+
+            filteredProducts = productRepository.findProductsByStoreId(storeId);
+        }
+
+        response.put("product", filteredProducts);
+        return response;
+    }
+
+
+    @GetMapping("search/{name}/{storeId}")
+    public Map<String, Object> searchProduct(
+            @PathVariable("name") String name,
+            @PathVariable("storeId") Long storeId) {
+
+        Map<String, Object> response = new HashMap<>();
+        List<Product> products = productRepository.findByNameLike(storeId, name);
+        response.put("product", products);
+        return response;
+    }
+
+
+    @DeleteMapping("/{id}")
+    public Map<String, String> removeProduct(@PathVariable("id") Long id) {
+        Map<String, String> response = new HashMap<>();
+
+        boolean productExists = serviceClass.validateProductId(id);
+        if (!productExists) {
+            response.put("message", "Product not present in database");
+            return response;
+        }
+
+        // Delete dependencies from the bridge inventory table first
+        inventoryRepository.deleteByProductId(id);
+        response.put("message", "Successfully deleted product");
+        return response;
+    }
+
+
+    @GetMapping("validate/{quantity}/{storeId}/{productId}")
+    public boolean validateQuantity(
+            @PathVariable("quantity") Integer quantity,
+            @PathVariable("storeId") Long storeId,
+            @PathVariable("productId") Long productId) {
+
+        Inventory inventory = inventoryRepository.findByProductIdAndStoreId(productId, storeId);
+
+        if (inventory != null && inventory.getStockLevel() >= quantity) {
+            return true;
+        }
+        return false;
+    }
 // 1. Set Up the Controller Class:
 //    - Annotate the class with `@RestController` to indicate that this is a REST controller, which handles HTTP requests and responses.
 //    - Use `@RequestMapping("/inventory")` to set the base URL path for all methods in this controller. All endpoints related to inventory will be prefixed with `/inventory`.
